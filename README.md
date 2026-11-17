@@ -103,4 +103,3 @@ de usuarios.
 
 Los microservicios de tienda y programas se desarrollan
 en repositorios independientes dentro de RadioJugoseo-Proyecto.
-```
