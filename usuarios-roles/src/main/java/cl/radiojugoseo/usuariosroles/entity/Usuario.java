@@ -1,4 +1,3 @@
-
 package cl.radiojugoseo.usuariosroles.entity;
 
 import java.time.LocalDate;
