@@ -7,6 +7,7 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import jakarta.servlet.DispatcherType;
+import org.springframework.security.config.Customizer;
 
 
 @Configuration
@@ -36,10 +37,16 @@ public class SecurityConfig {
                 
                 .requestMatchers(
                     HttpMethod.POST,
-                    "/api/v1/auth/registro"
+                    "/api/v1/auth/registro",
+                    "/api/v1/auth/login"
                 ).permitAll()
 
                 .anyRequest().authenticated()
+            )
+
+            // Validar JWT en solicitudes protegidas
+            .oauth2ResourceServer(oauth2 -> oauth2
+                .jwt(Customizer.withDefaults())
             );
 
         return http.build();
