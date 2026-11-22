@@ -14,7 +14,10 @@ import cl.radiojugoseo.usuariosroles.dto.LoginRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 import cl.radiojugoseo.usuariosroles.dto.LoginResponse;
-
+import java.util.List;
+import cl.radiojugoseo.usuariosroles.dto.UsuarioResumenResponse;
+import cl.radiojugoseo.usuariosroles.dto.CrearUsuarioInternoRequest;
+import cl.radiojugoseo.usuariosroles.dto.ActualizarUsuarioRequest;
 
 @Service
 public class UsuarioService {
@@ -157,6 +160,195 @@ public class UsuarioService {
                 usuario.getCorreo(),
                 rol
         );
+    }
+
+    // Obtener la lista de usuarios registrados
+    @Transactional(readOnly = true)
+    public List<UsuarioResumenResponse> listarUsuarios() {
+
+        return usuarioRepository.findAll()
+                .stream()
+                .map(usuario -> new UsuarioResumenResponse(
+                        usuario.getId(),
+                        usuario.getNombre(),
+                        usuario.getApellido(),
+                        usuario.getCorreo(),
+                        usuario.getRol().getNombre(),
+                        usuario.getTipo(),
+                        usuario.getActivo(),
+                        usuario.getFechaCreacion()
+                ))
+                .toList();
+    }
+
+
+    // Crear una cuenta interna de Locutor o Administrador
+    @Transactional
+    public RegistroUsuarioResponse crearUsuarioInterno(
+            CrearUsuarioInternoRequest request) {
+
+        // Normalizar el correo
+        String correo = request.correo()
+                .trim()
+                .toLowerCase(Locale.ROOT);
+
+        // Comprobar que el correo no esté registrado
+        if (usuarioRepository.existsByCorreoIgnoreCase(correo)) {
+            throw new IllegalArgumentException(
+                    "El correo ya está registrado"
+            );
+        }
+
+        // Buscar el rol solicitado en MySQL
+        Rol rol = rolRepository.findByNombre(request.rol())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "El rol seleccionado no existe"
+                ));
+
+        // Crear la entidad del nuevo usuario
+        Usuario usuario = new Usuario();
+
+        usuario.setNombre(request.nombre().trim());
+        usuario.setApellido(request.apellido().trim());
+        usuario.setCorreo(correo);
+        usuario.setPasswordHash(
+                passwordEncoder.encode(request.password())
+        );
+        usuario.setRol(rol);
+
+        // Guardar en MySQL
+        Usuario guardado = usuarioRepository.save(usuario);
+
+        // Devolver los datos del usuario creado
+        return new RegistroUsuarioResponse(
+                guardado.getId(),
+                guardado.getNombre(),
+                guardado.getApellido(),
+                guardado.getCorreo(),
+                rol.getNombre()
+        );
+    }
+
+    // Actualizar una cuenta desde el panel Administrador
+    @Transactional
+    public UsuarioResumenResponse actualizarUsuario(
+            Long id,
+            String idAdministrador,
+            ActualizarUsuarioRequest request) {
+
+        // Impedir que el Administrador edite su propia cuenta
+        if (String.valueOf(id).equals(idAdministrador)) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "No puedes modificar tu propia cuenta desde este panel"
+            );
+        }
+
+        // Buscar el usuario en MySQL
+        Usuario usuario = usuarioRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Usuario no encontrado"
+                ));
+
+        String rolActual = usuario.getRol().getNombre();
+        String rolNuevo = request.rol();
+
+        // No permitir convertir Clientes en cuentas internas
+        // ni convertir cuentas internas en Clientes
+        boolean esCliente = "Cliente".equals(rolActual);
+        boolean seraCliente = "Cliente".equals(rolNuevo);
+
+        if (esCliente != seraCliente) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "El cambio de tipo de cuenta no está permitido"
+            );
+        }
+
+        // Actualizar nombre y apellido
+        usuario.setNombre(request.nombre().trim());
+        usuario.setApellido(request.apellido().trim());
+
+        // Validar tipo de oyente cuando corresponde
+        if (seraCliente) {
+
+            if (!"Socio VIP".equals(request.tipo())
+                    && !"Radioescucha Oficial".equals(request.tipo())) {
+
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "El tipo de oyente no es válido"
+                );
+            }
+
+            usuario.setTipo(request.tipo());
+
+        } else {
+            usuario.setTipo(null);
+        }
+
+        // Actualizar el rol cuando haya cambiado
+        if (!rolActual.equals(rolNuevo)) {
+
+            Rol nuevoRol = rolRepository.findByNombre(rolNuevo)
+                    .orElseThrow(() -> new ResponseStatusException(
+                            HttpStatus.BAD_REQUEST,
+                            "El rol seleccionado no existe"
+                    ));
+
+            usuario.setRol(nuevoRol);
+        }
+
+        // Cambiar la contraseña solo cuando se proporciona una nueva
+        if (request.password() != null
+                && !request.password().isEmpty()) {
+
+            usuario.setPasswordHash(
+                    passwordEncoder.encode(request.password())
+            );
+        }
+
+        // Registrar una nueva versión de la cuenta
+        usuario.setVersionCuenta(usuario.getVersionCuenta() + 1);
+
+        // Guardar los cambios
+        Usuario actualizado = usuarioRepository.save(usuario);
+
+        // Devolver información sin exponer la contraseña
+        return new UsuarioResumenResponse(
+                actualizado.getId(),
+                actualizado.getNombre(),
+                actualizado.getApellido(),
+                actualizado.getCorreo(),
+                actualizado.getRol().getNombre(),
+                actualizado.getTipo(),
+                actualizado.getActivo(),
+                actualizado.getFechaCreacion()
+        );
+    }
+
+    // Eliminar una cuenta desde el panel Administrador
+    @Transactional
+    public void eliminarUsuario(Long id, String idAdministrador) {
+
+        // Impedir que el Administrador elimine su propia cuenta
+        if (String.valueOf(id).equals(idAdministrador)) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "No puedes eliminar tu propia cuenta"
+            );
+        }
+
+        // Buscar el usuario que se desea eliminar
+        Usuario usuario = usuarioRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Usuario no encontrado"
+                ));
+
+        // Eliminar el usuario de MySQL
+        usuarioRepository.delete(usuario);
     }
 
 }
