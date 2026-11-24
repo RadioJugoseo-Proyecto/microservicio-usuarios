@@ -1,3 +1,4 @@
+
 package cl.radiojugoseo.usuariosroles.dto;
 
 import jakarta.validation.constraints.Email;
@@ -18,13 +19,17 @@ public record CrearUsuarioInternoRequest(
     @NotBlank(message = "El correo es obligatorio")
     @Email(message = "El correo no es válido")
     @Size(max = 100)
+    @Pattern(
+        regexp = "(?i)^[^\\s@]+@jugoseo\\.com$",
+        message = "Las cuentas Locutor y Administrador deben utilizar un correo @jugoseo.com"
+    )
     String correo,
 
     @NotBlank(message = "La contraseña es obligatoria")
     @Size(
         min = 8,
-        max = 72,
-        message = "La contraseña debe tener entre 8 y 72 caracteres"
+        max = 10,
+        message = "La contraseña debe tener entre 8 y 10 caracteres"
     )
     String password,
 

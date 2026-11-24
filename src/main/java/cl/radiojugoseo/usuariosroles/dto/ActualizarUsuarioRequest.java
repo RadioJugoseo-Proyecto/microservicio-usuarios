@@ -24,8 +24,8 @@ public record ActualizarUsuarioRequest(
     String tipo,
 
     @Pattern(
-        regexp = "^$|^.{8,72}$",
-        message = "La contraseña debe tener entre 8 y 72 caracteres"
+        regexp = "^$|^.{8,10}$",
+        message = "La contraseña debe tener entre 8 y 10 caracteres"
     )
     String password
 
