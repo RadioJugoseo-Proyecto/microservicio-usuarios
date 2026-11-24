@@ -12,6 +12,13 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
+import cl.radiojugoseo.usuariosroles.repository.UsuarioRepository;
+import org.springframework.security.oauth2.core.OAuth2Error;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtValidators;
 
 @Configuration
 public class JwtConfig {
@@ -49,10 +56,76 @@ public class JwtConfig {
     }
 
     @Bean
-    public JwtDecoder jwtDecoder(SecretKey clave) {
-        return NimbusJwtDecoder
+    public JwtDecoder jwtDecoder(
+            SecretKey clave,
+            UsuarioRepository usuarioRepository) {
+
+        NimbusJwtDecoder decoder = NimbusJwtDecoder
                 .withSecretKey(clave)
                 .macAlgorithm(MacAlgorithm.HS256)
                 .build();
+
+        // Respuesta para un JWT que ya no es válido
+        OAuth2TokenValidatorResult tokenInvalido =
+                OAuth2TokenValidatorResult.failure(
+                        new OAuth2Error(
+                                "invalid_token",
+                                "La sesion no esta vigente",
+                                null
+                        )
+                );
+
+        // Comprobar el estado actual de la cuenta en MySQL
+        OAuth2TokenValidator<Jwt> validarCuenta = jwt -> {
+
+            // Solo aceptar tokens de acceso
+            if (!"acceso".equals(jwt.getClaimAsString("tipo"))) {
+                return tokenInvalido;
+            }
+
+            // Obtener el ID del usuario
+            Long usuarioId;
+
+            try {
+                usuarioId = Long.valueOf(jwt.getSubject());
+            } catch (NumberFormatException ex) {
+                return tokenInvalido;
+            }
+
+            // Obtener la version incluida en el JWT
+            Object versionToken = jwt.getClaim("versionCuenta");
+
+            if (!(versionToken instanceof Number numeroVersion)) {
+                return tokenInvalido;
+            }
+
+            // Buscar la cuenta y comprobar su estado
+            boolean cuentaValida = usuarioRepository.findById(usuarioId)
+                    .filter(usuario ->
+                            Boolean.TRUE.equals(usuario.getActivo())
+                    )
+                    .filter(usuario ->
+                            usuario.getVersionCuenta() != null
+                            && usuario.getVersionCuenta().longValue()
+                                    == numeroVersion.longValue()
+                    )
+                    .isPresent();
+
+            return cuentaValida
+                    ? OAuth2TokenValidatorResult.success()
+                    : tokenInvalido;
+        };
+
+        // Conservar validaciones normales y agregar la de MySQL
+        decoder.setJwtValidator(
+                new DelegatingOAuth2TokenValidator<>(
+                        JwtValidators.createDefaultWithIssuer(
+                                "radiojugoseo-usuarios"
+                        ),
+                        validarCuenta
+                )
+        );
+
+        return decoder;
     }
 }

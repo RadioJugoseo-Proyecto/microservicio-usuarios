@@ -18,6 +18,9 @@ import java.util.List;
 import cl.radiojugoseo.usuariosroles.dto.UsuarioResumenResponse;
 import cl.radiojugoseo.usuariosroles.dto.CrearUsuarioInternoRequest;
 import cl.radiojugoseo.usuariosroles.dto.ActualizarUsuarioRequest;
+import cl.radiojugoseo.usuariosroles.dto.RenovarTokenRequest;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtException;
 
 @Service
 public class UsuarioService {
@@ -135,30 +138,40 @@ public class UsuarioService {
     }
 
 
+
     @Transactional(readOnly = true)
     public LoginResponse iniciarSesion(LoginRequest request) {
 
         // Verificar correo, contraseña y estado de la cuenta
         Usuario usuario = verificarCredenciales(request);
 
-        // Obtener el rol del usuario
+        // Obtener el rol y la version actual de la cuenta
         String rol = usuario.getRol().getNombre();
+        Long versionCuenta = usuario.getVersionCuenta();
 
-        // Generar el token JWT
+        // Generar el JWT de acceso (duracion: 1 hora)
         String token = jwtService.generarToken(
                 usuario.getId(),
                 usuario.getCorreo(),
-                rol
+                rol,
+                versionCuenta
         );
 
-        // Devolver la información del inicio de sesión
+        // Generar el JWT de renovacion (duracion: 7 dias)
+        String tokenRenovacion = jwtService.generarTokenRenovacion(
+                usuario.getId(),
+                versionCuenta
+        );
+
+        // Devolver ambos tokens y los datos del usuario
         return new LoginResponse(
                 token,
                 "Bearer",
                 usuario.getId(),
                 usuario.getNombre(),
                 usuario.getCorreo(),
-                rol
+                rol,
+                tokenRenovacion
         );
     }
 
@@ -351,4 +364,93 @@ public class UsuarioService {
         usuarioRepository.delete(usuario);
     }
 
+    // Renovar la sesion utilizando un JWT de renovacion
+    @Transactional(readOnly = true)
+    public LoginResponse renovarSesion(RenovarTokenRequest request) {
+
+        // Validar firma, expiracion, emisor y tipo del JWT
+        Jwt jwt;
+
+        try {
+            jwt = jwtService.validarTokenRenovacion(
+                    request.tokenRenovacion()
+            );
+        } catch (JwtException | IllegalArgumentException ex) {
+            throw new ResponseStatusException(
+                    HttpStatus.UNAUTHORIZED,
+                    "Token de renovacion invalido"
+            );
+        }
+
+        // Obtener el ID incluido en el token
+        Long usuarioId;
+
+        try {
+            usuarioId = Long.valueOf(jwt.getSubject());
+        } catch (NumberFormatException ex) {
+            throw new ResponseStatusException(
+                    HttpStatus.UNAUTHORIZED,
+                    "Token de renovacion invalido"
+            );
+        }
+
+        // Verificar que el token incluya una version de cuenta
+        Object versionToken = jwt.getClaim("versionCuenta");
+
+        if (!(versionToken instanceof Number version)) {
+            throw new ResponseStatusException(
+                    HttpStatus.UNAUTHORIZED,
+                    "Token de renovacion invalido"
+            );
+        }
+
+        // Buscar la cuenta en MySQL
+        Usuario usuario = usuarioRepository.findById(usuarioId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.UNAUTHORIZED,
+                        "La sesion ya no esta vigente"
+                ));
+
+        // Comprobar que la cuenta siga activa
+        if (!Boolean.TRUE.equals(usuario.getActivo())) {
+            throw new ResponseStatusException(
+                    HttpStatus.UNAUTHORIZED,
+                    "La sesion ya no esta vigente"
+            );
+        }
+
+        // Comprobar que la version no haya cambiado
+        if (usuario.getVersionCuenta() == null
+                || usuario.getVersionCuenta().longValue()
+                        != version.longValue()) {
+
+            throw new ResponseStatusException(
+                    HttpStatus.UNAUTHORIZED,
+                    "La sesion ya no esta vigente"
+            );
+        }
+
+        // Obtener los datos actuales del usuario
+        String rol = usuario.getRol().getNombre();
+
+        // Generar un nuevo JWT de acceso
+        String nuevoToken = jwtService.generarToken(
+                usuario.getId(),
+                usuario.getCorreo(),
+                rol,
+                usuario.getVersionCuenta()
+        );
+
+        // Devolver el nuevo acceso y conservar el token
+        // de renovacion hasta su fecha de expiracion original
+        return new LoginResponse(
+                nuevoToken,
+                "Bearer",
+                usuario.getId(),
+                usuario.getNombre(),
+                usuario.getCorreo(),
+                rol,
+                request.tokenRenovacion()
+        );
+    }
 }

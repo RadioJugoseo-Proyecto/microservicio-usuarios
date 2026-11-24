@@ -47,10 +47,21 @@ public class SecurityConfig {
                     DispatcherType.ERROR
                 ).permitAll()
 
+                // Rutas de autenticacion que no requieren JWT de acceso
                 .requestMatchers(
                     HttpMethod.POST,
                     "/api/v1/auth/registro",
-                    "/api/v1/auth/login"
+                    "/api/v1/auth/login",
+                    "/api/v1/auth/renovar"
+                ).permitAll()
+
+                // Permitir consultar la documentacion Swagger/OpenAPI
+                .requestMatchers(
+                    HttpMethod.GET,
+                    "/swagger-ui.html",
+                    "/swagger-ui/**",
+                    "/v3/api-docs",
+                    "/v3/api-docs/**"
                 ).permitAll()
 
                 // Solo el Administrador puede listar usuarios
